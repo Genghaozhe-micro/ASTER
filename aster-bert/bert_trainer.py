@@ -6,6 +6,7 @@ from torch.distributions import Categorical
 from tqdm import tqdm
 import os
 import torch.distributed as dist
+from torch.utils.tensorboard import SummaryWriter
 
 from reward import TIDR_V2
 from components import ScoringModel, DynamicAdapter
@@ -35,6 +36,13 @@ class ASTERTrainerBERT:
             skip_penalty_weight=config.SKIP_PENALTY_WEIGHT
         )
 
+        # TensorBoard: only rank 0 writes logs
+        self.writer = None
+        if self.rank == 0:
+            log_dir = os.path.join(config.CHECKPOINT_DIR, "tb_logs")
+            self.writer = SummaryWriter(log_dir=log_dir)
+            print(f"TensorBoard logs → {log_dir}")
+
     def _get_final_logits_and_pred(self, final_hidden_state):
         # [MODIFIED] Access the classifier through the base model directly. This is compatible with both BERT and DistilBERT.
         cls_token_state = final_hidden_state[:, 0]
@@ -63,6 +71,7 @@ class ASTERTrainerBERT:
             print("--- Starting ASTER-DistilBERT Training ---")
 
         if start_epoch == 0: self.optimizer.zero_grad()
+        global_step = start_epoch * len(train_dataloader)
 
         for epoch in range(start_epoch, self.config.NUM_EPOCHS):
             if self.rank == 0: print(f"\n--- Epoch {epoch + 1}/{self.config.NUM_EPOCHS} ---")
@@ -71,6 +80,7 @@ class ASTERTrainerBERT:
                 train_sampler.set_epoch(epoch)
 
             pbar = tqdm(train_dataloader, desc=f"Epoch {epoch + 1}", disable=(self.rank != 0))
+            epoch_correct, epoch_total = 0, 0
 
             for step, batch in enumerate(pbar):
                 input_ids = batch['input_ids'].to(self.device)
@@ -108,10 +118,10 @@ class ASTERTrainerBERT:
 
                         # Note: DistilBERT does not use an extended attention mask in its forward pass.
                         # The attention mask is handled internally by the transformer layers.
-                        processed_states = self.bert_encoder.layer[l_curr](group_hidden_states,
+                        layer_output = self.bert_encoder.layer[l_curr](group_hidden_states,
                                                                            attn_mask=attention_mask.index_select(0,
-                                                                                                                 group_indices))[
-                            0]
+                                                                                                                 group_indices))
+                        processed_states = layer_output[0] if isinstance(layer_output, tuple) else layer_output
 
                         teacher_ref_state = teacher_hidden_states[l_curr + 1].detach().index_select(0, group_indices)
                         kd_loss = self._compute_knowledge_distillation_loss(processed_states, teacher_ref_state)
@@ -160,6 +170,24 @@ class ASTERTrainerBERT:
                     kd_loss_rollout.append(step_kd_loss)
                     l_next_rollout.append(l_curr_batch.clone())
 
+                # Execute remaining layers that were jumped to but not yet executed.
+                # This aligns training with inference, where all layers from l_curr
+                # to num_layers-1 are executed after the decision loop exits.
+                for final_l in range(self.num_layers):
+                    needs_exec = (l_curr_batch == final_l)
+                    if not torch.any(needs_exec):
+                        continue
+                    for remaining_l in range(final_l, self.num_layers):
+                        exec_indices = needs_exec.nonzero(as_tuple=True)[0]
+                        group_states = student_hidden_state.index_select(0, exec_indices)
+                        layer_output = self.bert_encoder.layer[remaining_l](
+                            group_states,
+                            attn_mask=attention_mask.index_select(0, exec_indices))
+                        processed = layer_output[0] if isinstance(layer_output, tuple) else layer_output
+                        student_hidden_state.index_copy_(0, exec_indices, processed)
+                    # Mark these samples as fully executed
+                    l_curr_batch.masked_fill_(needs_exec, self.num_layers)
+
                 final_logits, pred_idx = self._get_final_logits_and_pred(student_hidden_state)
                 final_pred_correct = (pred_idx == labels)
                 loss_ce = F.cross_entropy(final_logits, labels)
@@ -204,6 +232,28 @@ class ASTERTrainerBERT:
                     pbar.set_postfix({"Loss": f"{total_loss.item():.4f}", "CE": f"{loss_ce.item():.4f}",
                                       "RL": f"{policy_loss.item():.8f}", "KD": f"{total_kd_loss.item():.4f}"})
 
+                # TensorBoard logging
+                if self.writer is not None:
+                    global_step += 1
+                    self.writer.add_scalar('Loss/total', total_loss.item(), global_step)
+                    self.writer.add_scalar('Loss/CE', loss_ce.item(), global_step)
+                    self.writer.add_scalar('Loss/RL_policy', policy_loss.item(), global_step)
+                    self.writer.add_scalar('Loss/KD', total_kd_loss.item(), global_step)
+                    self.writer.add_scalar('Loss/CE_weighted', self.config.CE_LOSS_WEIGHT * loss_ce.item(), global_step)
+                    self.writer.add_scalar('Loss/RL_weighted', self.config.RL_LOSS_WEIGHT * policy_loss.item(), global_step)
+                    self.writer.add_scalar('Loss/KD_weighted', self.config.KD_LOSS_WEIGHT * total_kd_loss.item(), global_step)
+                    self.writer.add_scalar('Train/accuracy', final_pred_correct.float().mean().item(), global_step)
+                    self.writer.add_scalar('Train/avg_decision_steps', num_steps, global_step)
+
+                epoch_correct += final_pred_correct.sum().item()
+                epoch_total += batch_size
+
+            # Epoch-level logging
+            if self.writer is not None:
+                epoch_acc = epoch_correct / epoch_total if epoch_total > 0 else 0
+                self.writer.add_scalar('Epoch/accuracy', epoch_acc, epoch + 1)
+                self.writer.flush()
+
             if self.rank == 0:
                 self.save_checkpoint(epoch)
 
@@ -217,3 +267,7 @@ class ASTERTrainerBERT:
         torch.save(checkpoint, checkpoint_path)
 
         print(f"Saved checkpoint for epoch {epoch + 1} to {checkpoint_path}")
+
+    def close(self):
+        if self.writer is not None:
+            self.writer.close()

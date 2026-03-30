@@ -15,15 +15,15 @@ def load_model_and_tokenizer():
     The base model is used as the 'teacher' and for its architecture.
     """
     print(f"--- Loading Model and Tokenizer for {config.MODEL_ID} from HF Mirror ---")
-    device = config.DEVICE
 
     # 1. Load Model from Hugging Face Hub (via mirror)
-    # The number of labels is determined by the dataset (SST-2 has 2 labels)
+    # Load to CPU first to avoid all processes competing for cuda:0 memory in DDP.
+    # The caller is responsible for moving the model to the correct device.
     model = AutoModelForSequenceClassification.from_pretrained(
         config.MODEL_ID,
         output_hidden_states=True,
         num_labels=2
-    ).to(device)
+    )
     model.eval()  # Base model is frozen and used for feature extraction
 
     # 2. Load Tokenizer from Hugging Face Hub (via mirror)

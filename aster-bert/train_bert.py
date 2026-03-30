@@ -32,13 +32,14 @@ def main(args):
 
     print("Loading base DistilBERT model and tokenizer...")
     model, tokenizer = load_model_and_tokenizer()
+    model.to(config.DEVICE)
 
     print(f"Loading dataset {config.DATASET_NAME}/{config.DATASET_CONFIG} from HF Hub...")
     try:
-        raw_datasets = load_dataset(config.DATASET_NAME, config.DATASET_CONFIG)
+        raw_datasets = load_dataset(config.DATASET_NAME, config.DATASET_CONFIG, verification_mode='no_checks')
     except Exception:
         print("Could not reach Hugging Face Hub. Attempting to use local cache.")
-        raw_datasets = load_dataset(config.DATASET_NAME, config.DATASET_CONFIG, trust_remote_code=True)
+        raw_datasets = load_dataset(config.DATASET_NAME, config.DATASET_CONFIG, verification_mode='no_checks')
 
     def preprocess_function(examples):
         return tokenizer(

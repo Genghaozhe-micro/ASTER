@@ -38,7 +38,8 @@ def predict_greedy(model, scorer, adapter, input_ids, attention_mask):
 
         while l_curr < num_layers - 1:
             executed_layers_count += 1
-            student_hidden_state = model.distilbert.transformer.layer[l_curr](student_hidden_state, attn_mask=attention_mask)[0]
+            layer_output = model.distilbert.transformer.layer[l_curr](student_hidden_state, attn_mask=attention_mask)
+            student_hidden_state = layer_output[0] if isinstance(layer_output, tuple) else layer_output
             cls_state = student_hidden_state[:, 0, :]
 
             required_future_steps = config.MIN_TOTAL_EXECUTED_LAYERS - executed_layers_count
@@ -66,7 +67,8 @@ def predict_greedy(model, scorer, adapter, input_ids, attention_mask):
             l_curr = l_next
 
         for final_l in range(l_curr, num_layers):
-            student_hidden_state = model.distilbert.transformer.layer[final_l](student_hidden_state, attn_mask=attention_mask)[0]
+            layer_output = model.distilbert.transformer.layer[final_l](student_hidden_state, attn_mask=attention_mask)
+            student_hidden_state = layer_output[0] if isinstance(layer_output, tuple) else layer_output
             if final_l >= l_curr:
                 executed_layers_count += 1
 
@@ -91,6 +93,7 @@ def run_evaluation(args):
         return
 
     model, tokenizer = load_model_and_tokenizer()
+    model.to(config.DEVICE)
     model.eval()
 
     hidden_dim = model.config.hidden_size
@@ -111,10 +114,10 @@ def run_evaluation(args):
 
     print(f"Loading and processing evaluation dataset ({config.DATASET_NAME}/{config.DATASET_CONFIG})...")
     try:
-        raw_datasets = load_dataset(config.DATASET_NAME, config.DATASET_CONFIG)
+        raw_datasets = load_dataset(config.DATASET_NAME, config.DATASET_CONFIG, verification_mode='no_checks')
     except Exception:
         print("Could not reach Hugging Face Hub. Attempting to use local cache.")
-        raw_datasets = load_dataset(config.DATASET_NAME, config.DATASET_CONFIG, trust_remote_code=True)
+        raw_datasets = load_dataset(config.DATASET_NAME, config.DATASET_CONFIG, verification_mode='no_checks')
 
     def preprocess_function(examples):
         return tokenizer(examples[config.DATASET_TEXT_COLUMN], padding="max_length", truncation=True,

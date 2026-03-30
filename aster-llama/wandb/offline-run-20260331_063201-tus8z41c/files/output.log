@@ -1,0 +1,11 @@
+Wandb initialized.
+Starting MMLU training from epoch 1...
+--- Starting ASTER-MMLU Training ---
+--- Epoch 1/3 ---
+
+
+Epoch 1:  79%|███████▊  | 4914/6241 [24:48<05:41,  3.89it/s, Loss=17.0533, CE=1.3852, RL=0.00095563, KD=3200.5430]
+Saved MMLU checkpoint for epoch 1 to ./checkpoints_qwen_mmlu/aster_mmlu_checkpoint.pt
+Epoch 1: 100%|██████████| 6241/6241 [30:36<00:00,  3.40it/s, Loss=17.6694, CE=1.4510, RL=-0.03940819, KD=3179.0012]
+
+Epoch 2:  22%|██▏       | 1382/6241 [06:15<21:10,  3.82it/s, Loss=20.7374, CE=1.5019, RL=5.55065250, KD=2942.9546]

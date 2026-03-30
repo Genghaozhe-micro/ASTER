@@ -1,0 +1,1 @@
+{"_runtime": 2211, "Train/avg_decision_steps": 14, "Loss/RL_policy": -0.002829447388648987, "Loss/KD": 3182.6962890625, "_timestamp": 1774940932.8073778, "_step": 7622, "Loss/total": 16.95037841796875, "Loss/CE": 1.376909613609314, "Train/accuracy": 0.5}

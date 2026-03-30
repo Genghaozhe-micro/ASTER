@@ -51,21 +51,28 @@ def main_process(rank, world_size, args):
 
     if rank == 0: print("Loading base model and tokenizer...")
     model, tokenizer = load_model_and_tokenizer()
-    model.to(device)
+    model.to(device)  # Move to the correct GPU for this rank
     model.eval()
 
-    if rank == 0: print(f"Loading and processing dataset...")
-    # Dataset loading should be done once if possible, but it's safe this way.
-    raw_datasets = load_dataset(config.DATASET_NAME, config.DATASET_CONFIG)
-
+    # Rank 0 downloads and preprocesses the dataset first; others wait then read from cache.
     def preprocess_function(examples):
         return tokenizer(examples[config.DATASET_TEXT_COLUMN], padding="max_length", truncation=True,
                          max_length=config.MAX_SEQ_LENGTH)
 
-    tokenized_datasets = raw_datasets.map(preprocess_function, batched=True, num_proc=os.cpu_count())
-    tokenized_datasets = tokenized_datasets.remove_columns([c for c in ['sentence', 'idx'] if c in tokenized_datasets['train'].column_names])
-    tokenized_datasets = tokenized_datasets.rename_column("label", "labels")
-    tokenized_datasets.set_format("torch")
+    if rank == 0:
+        print(f"Loading and processing dataset...")
+        raw_datasets = load_dataset(config.DATASET_NAME, config.DATASET_CONFIG, verification_mode='no_checks')
+        tokenized_datasets = raw_datasets.map(preprocess_function, batched=True, num_proc=4)
+        tokenized_datasets = tokenized_datasets.remove_columns([c for c in ['sentence', 'idx'] if c in tokenized_datasets['train'].column_names])
+        tokenized_datasets = tokenized_datasets.rename_column("label", "labels")
+        tokenized_datasets.set_format("torch")
+    dist.barrier()  # Wait for rank 0 to finish
+    if rank != 0:
+        raw_datasets = load_dataset(config.DATASET_NAME, config.DATASET_CONFIG, verification_mode='no_checks')
+        tokenized_datasets = raw_datasets.map(preprocess_function, batched=True, num_proc=4)
+        tokenized_datasets = tokenized_datasets.remove_columns([c for c in ['sentence', 'idx'] if c in tokenized_datasets['train'].column_names])
+        tokenized_datasets = tokenized_datasets.rename_column("label", "labels")
+        tokenized_datasets.set_format("torch")
     train_dataset = tokenized_datasets["train"]
 
     train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank, shuffle=True)
@@ -82,8 +89,8 @@ def main_process(rank, world_size, args):
     scorer = ScoringModel(hidden_dim, config.SCORER_HIDDEN_DIM, num_layers, model_dtype).to(device)
     adapter = DynamicAdapter(hidden_dim, config.ADAPTER_BOTTLENECK_DIM, num_layers, model_dtype).to(device)
 
-    scorer = DDP(scorer, device_ids=[rank])
-    adapter = DDP(adapter, device_ids=[rank])
+    scorer = DDP(scorer, device_ids=[rank], find_unused_parameters=True)
+    adapter = DDP(adapter, device_ids=[rank], find_unused_parameters=True)
 
     optimizer = AdamW(list(scorer.parameters()) + list(adapter.parameters()), lr=config.LEARNING_RATE * world_size)
 

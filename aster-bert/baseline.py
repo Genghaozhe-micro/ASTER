@@ -30,10 +30,11 @@ def run_baseline_evaluation(args):
 
     print(f"Loading original pre-trained model '{config.MODEL_ID}' for baseline test.")
     model, tokenizer = load_model_and_tokenizer()
+    model.to(config.DEVICE)
     model.eval()
 
     print(f"Loading and processing evaluation dataset ({config.DATASET_NAME}/{config.DATASET_CONFIG})...")
-    raw_datasets = load_dataset(config.DATASET_NAME, config.DATASET_CONFIG)
+    raw_datasets = load_dataset(config.DATASET_NAME, config.DATASET_CONFIG, verification_mode='no_checks')
 
     def preprocess_function(examples):
         return tokenizer(examples[config.DATASET_TEXT_COLUMN], padding="max_length", truncation=True,

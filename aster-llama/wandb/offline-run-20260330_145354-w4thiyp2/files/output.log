@@ -1,0 +1,13 @@
+Wandb initialized.
+Starting distributed training from epoch 1...
+--- Starting ASTER-LLaMA Training ---
+--- Epoch 1/3 ---
+Saved checkpoint for epoch 1 to ./checkpoints_qwen_boolq/aster_llama_checkpoint.pt
+--- Epoch 2/3 ---
+Epoch 1: 100%|██████████| 590/590 [02:17<00:00,  4.28it/s, Loss=1350.9194, CE=0.2234, RL=3.59341669, KD=1346.8882]
+Epoch 2: 100%|█████████▉| 588/590 [02:26<00:00,  4.58it/s, Loss=1320.2399, CE=0.7897, RL=-0.55964971, KD=1312.6229]
+Saved checkpoint for epoch 2 to ./checkpoints_qwen_boolq/aster_llama_checkpoint.pt
+--- Epoch 3/3 ---
+Saved checkpoint for epoch 3 to ./checkpoints_qwen_boolq/aster_llama_checkpoint.pt
+Epoch 2: 100%|██████████| 590/590 [02:27<00:00,  3.99it/s, Loss=1582.8940, CE=0.8259, RL=-1.90047932, KD=1575.5848]
+Epoch 3: 100%|██████████| 590/590 [02:13<00:00,  4.42it/s, Loss=1284.5814, CE=0.5624, RL=-1.78071797, KD=1279.8480]
